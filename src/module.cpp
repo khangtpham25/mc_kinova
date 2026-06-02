@@ -79,11 +79,21 @@ extern "C"
     }
     if(n == "KinovaCameraGripper")
     {
-      return new mc_robots::KinovaRobotModule("kinova_camera_gripper", false, true);
+      auto kinova_camera_module = mc_robots::KinovaRobotModule("kinova_camera", false, true);
+      auto gripper_module = mc_rbdyn::RobotLoader::get_robot_module("Robotiq2f85Gripper");
+      auto connected = kinova_camera_module.connect(
+          *gripper_module, "tool_frame", "robotiq_85_base_link", "",
+          mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+      return new mc_rbdyn::RobotModule(std::move(connected));
     }
     if(n == "KinovaCameraGripperFloatingBase")
     {
-      return new mc_robots::KinovaRobotModule("kinova_camera_gripper", false, false);
+      auto kinova_camera_module = mc_robots::KinovaRobotModule("kinova_camera", false, false);
+      auto gripper_module = mc_rbdyn::RobotLoader::get_robot_module("Robotiq2f85Gripper");
+      auto connected = kinova_camera_module.connect(
+          *gripper_module, "tool_frame", "robotiq_85_base_link", "",
+          mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+      return new mc_rbdyn::RobotModule(std::move(connected));
     }
 
     if(n == "KinovaBota")
