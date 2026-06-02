@@ -1,5 +1,6 @@
 #include "kinova.h"
 
+#include <mc_rbdyn/RobotLoader.h>
 #include <mc_rbdyn/RobotModuleMacros.h>
 #include <mc_rtc/logging.h>
 
@@ -39,6 +40,7 @@ extern "C"
   ROBOT_MODULE_API mc_rbdyn::RobotModule * create(const std::string & n)
   {
     ROBOT_MODULE_CHECK_VERSION("Kinova")
+
     if(n == "Kinova")
     {
       return new mc_robots::KinovaRobotModule("kinova", false, true);
@@ -59,11 +61,21 @@ extern "C"
     }
     if(n == "KinovaGripper")
     {
-      return new mc_robots::KinovaRobotModule("kinova_gripper", false, true);
+      auto kinova_module = mc_robots::KinovaRobotModule("kinova", false, true);
+      auto gripper_module = mc_rbdyn::RobotLoader::get_robot_module("Robotiq2f85Gripper");
+      auto connected =
+          kinova_module.connect(*gripper_module, "tool_frame", "robotiq_85_base_link", "",
+                                mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+      return new mc_rbdyn::RobotModule(std::move(connected));
     }
     if(n == "KinovaGripperFloatingBase")
     {
-      return new mc_robots::KinovaRobotModule("kinova_gripper", false, false);
+      auto kinova_module = mc_robots::KinovaRobotModule("kinova", false, false);
+      auto gripper_module = mc_rbdyn::RobotLoader::get_robot_module("Robotiq2f85Gripper");
+      auto connected =
+          kinova_module.connect(*gripper_module, "tool_frame", "robotiq_85_base_link", "",
+                                mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+      return new mc_rbdyn::RobotModule(std::move(connected));
     }
     if(n == "KinovaCameraGripper")
     {
