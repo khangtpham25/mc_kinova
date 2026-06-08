@@ -13,38 +13,9 @@ namespace fs = std::filesystem;
 namespace mc_robots
 {
 
-inline static bool supportsCallib(bool use_bota, KinovaRobotModule::EndEffector end_effector)
-{
-  return use_bota && end_effector != KinovaRobotModule::EndEffector::None;
-}
-
 KinovaRobotModule::KinovaRobotModule(const std::string & name, bool callib, bool fixed)
 : mc_rbdyn::RobotModule(KINOVA_DESCRIPTION_PATH, name)
 {
-
-  bool gripper = name.find("gripper") != std::string::npos;
-  bool camera = name.find("camera") != std::string::npos;
-  bool use_bota = name.find("bota") != std::string::npos;
-
-  EndEffector end_effector = EndEffector::None;
-  if(name.find("ds4") != std::string::npos)
-  {
-    end_effector = EndEffector::DS4;
-  }
-  else if(name.find("plate") != std::string::npos)
-  {
-    end_effector = EndEffector::Plate;
-  }
-  else if(name.find("screw") != std::string::npos)
-  {
-    end_effector = EndEffector::Screw;
-  }
-
-  if(callib && !supportsCallib(use_bota, end_effector))
-  {
-    throw std::invalid_argument("KinovaRobotModule callib mode requires a Bota variant with a mounted end effector");
-  }
-
   mc_rtc::log::success("KinovaRobotModule loaded with name: {}", name);
   if(callib)
   {
@@ -62,13 +33,6 @@ KinovaRobotModule::KinovaRobotModule(const std::string & name, bool callib, bool
   mc_rtc::log::success("KinovaRobotModule using path \"{}\" for rsdf", rsdf_dir);
 
   _ref_joint_order = {"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"};
-
-  if(gripper)
-  {
-    _ref_joint_order.push_back("robotiq_85_left_knuckle_joint");
-    auto gripperSafety = mc_rbdyn::RobotModule::Gripper::Safety{0.99, 0.05, 0.05, 1};
-    _grippers = {{"gripper", {"robotiq_85_left_knuckle_joint"}, true, gripperSafety}};
-  }
 
   // Override position, velocity and effort bounds
   auto update_joint_limit = [this](const std::string & name, double limit_low, double limit_up)
@@ -163,24 +127,12 @@ KinovaRobotModule::KinovaRobotModule(const std::string & name, bool callib, bool
     }
   }
 
-  // Define a force sensor
-  if(use_bota)
-  {
-    _forceSensors.push_back(mc_rbdyn::ForceSensor("EEForceSensor", "FT_sensor_wrench", sva::PTransformd::Identity()));
-    _bodySensors.push_back(mc_rbdyn::BodySensor("Accelerometer", "FT_sensor_imu", sva::PTransformd::Identity()));
-  }
-  else
-  {
-    _forceSensors.push_back(mc_rbdyn::ForceSensor("EEForceSensor", "tool_frame", sva::PTransformd::Identity()));
-    _bodySensors.push_back(mc_rbdyn::BodySensor("Accelerometer", "tool_frame", sva::PTransformd::Identity()));
-  }
-
-  // Clear body sensors
-  _bodySensors.clear();
+  _forceSensors.push_back(mc_rbdyn::ForceSensor("EEForceSensor", "tool_frame", sva::PTransformd::Identity()));
+  _bodySensors.push_back(mc_rbdyn::BodySensor("Accelerometer", "tool_frame", sva::PTransformd::Identity()));
 
   const double i = 0.03;
   const double s = 0.015;
-  const double d = 0.;
+  const double d = 0.0;
   // Define a minimal set of self-collisions
   _minimalSelfCollisions = {{"base_link", "spherical_wrist_1_link", i, s, d},
                             {"shoulder_link", "spherical_wrist_1_link", i, s, d},
@@ -194,84 +146,6 @@ KinovaRobotModule::KinovaRobotModule(const std::string & name, bool callib, bool
                             {"shoulder_link", "bracelet_link", i, s, d},
                             {"half_arm_1_link", "bracelet_link", i, s, d},
                             {"half_arm_2_link", "bracelet_link", i, s, d}};
-
-  if(use_bota)
-  {
-    _minimalSelfCollisions.insert(_minimalSelfCollisions.end(), {{"base_link", "FT_adapter", i, s, d},
-                                                                 {"shoulder_link", "FT_adapter", i, s, d},
-                                                                 {"half_arm_1_link", "FT_adapter", i, s, d},
-                                                                 {"half_arm_2_link", "FT_adapter", i, s, d},
-                                                                 {"base_link", "FT_sensor_mounting_0", i, s, d},
-                                                                 {"shoulder_link", "FT_sensor_mounting_0", i, s, d},
-                                                                 {"half_arm_1_link", "FT_sensor_mounting_0", i, s, d},
-                                                                 {"half_arm_2_link", "FT_sensor_mounting_0", i, s, d}});
-  }
-
-  if(end_effector == EndEffector::DS4)
-  {
-    _minimalSelfCollisions.insert(_minimalSelfCollisions.end(), {{"base_link", "DS4", i, s, d},
-                                                                 {"shoulder_link", "DS4", i, s, d},
-                                                                 {"half_arm_1_link", "DS4", i, s, d},
-                                                                 {"half_arm_2_link", "DS4", i, s, d}});
-  }
-
-  if(end_effector == EndEffector::Plate)
-  {
-    _minimalSelfCollisions.insert(_minimalSelfCollisions.end(), {{"base_link", "plate", i, s, d},
-                                                                 {"shoulder_link", "plate", i, s, d},
-                                                                 {"half_arm_1_link", "plate", i, s, d},
-                                                                 {"half_arm_2_link", "plate", i, s, d}});
-  }
-
-  if(end_effector == EndEffector::Screw)
-  {
-    _minimalSelfCollisions.insert(_minimalSelfCollisions.end(), {{"base_link", "screw", i, s, d},
-                                                                 {"shoulder_link", "screw", i, s, d},
-                                                                 {"half_arm_1_link", "screw", i, s, d},
-                                                                 {"half_arm_2_link", "screw", i, s, d}});
-  }
-
-  if(gripper)
-  {
-    _minimalSelfCollisions.insert(_minimalSelfCollisions.end(),
-                                  {{"base_link", "robotiq_85_base_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_base_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_base_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_base_link", i, s, d},
-
-                                   {"base_link", "robotiq_85_left_knuckle_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_left_knuckle_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_left_knuckle_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_left_knuckle_link", i, s, d},
-
-                                   {"base_link", "robotiq_85_right_knuckle_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_right_knuckle_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_right_knuckle_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_right_knuckle_link", i, s, d},
-
-                                   {"base_link", "robotiq_85_left_finger_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_left_finger_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_left_finger_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_left_finger_link", i, s, d},
-
-                                   {"base_link", "robotiq_85_right_finger_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_right_finger_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_right_finger_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_right_finger_link", i, s, d},
-
-                                   {"base_link", "robotiq_85_left_finger_tip_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_left_finger_tip_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_left_finger_tip_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_left_finger_tip_link", i, s, d},
-
-                                   {"base_link", "robotiq_85_right_finger_tip_link", i, s, d},
-                                   {"shoulder_link", "robotiq_85_right_finger_tip_link", i, s, d},
-                                   {"half_arm_1_link", "robotiq_85_right_finger_tip_link", i, s, d},
-                                   {"half_arm_2_link", "robotiq_85_right_finger_tip_link", i, s, d}});
-  }
-
-  /* Additional self collisions */
-
   _commonSelfCollisions = _minimalSelfCollisions;
 
   // Default configuration of the floating base
