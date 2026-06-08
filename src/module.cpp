@@ -186,15 +186,20 @@ extern "C"
     if(n.find("Bota") != std::string::npos)
     {
       auto bota = mc_rbdyn::RobotLoader::get_robot_module(bota_name);
+      // if(!kinova._forceSensors.empty())
+      // {
+      //   kinova._forceSensors.pop_back();
+      // }
+      // if(!kinova._bodySensors.empty())
+      // {
+      //   kinova._bodySensors.pop_back();
+      // }
+
       auto kinova_bota =
           kinova.connect(*bota, "tool_frame", bota_base_frame, "",
                          mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
       addToolCollisions(kinova_bota,
                         {"bft_sens_ecat_m8_mounting_0", "bft_sens_ecat_m8_mounting_1", "bft_sens_ecat_m8_mounting_2"});
-      kinova_bota._forceSensors.back() =
-          mc_rbdyn::ForceSensor("EEForceSensor", "bft_sens_ecat_m8_wrench", sva::PTransformd::Identity());
-      kinova_bota._bodySensors.back() =
-          mc_rbdyn::BodySensor("Accelerometer", "bft_sens_ecat_m8_imu", sva::PTransformd::Identity());
       if(n == "KinovaBota" || n == "KinovaBotaFloatingBase")
       {
         return new mc_rbdyn::RobotModule(std::move(kinova_bota));
