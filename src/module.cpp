@@ -94,7 +94,7 @@ extern "C"
     }
 
     // Create base module
-    bool is_floating_base = n.find("FloatingBase") != std::string::npos;
+    bool is_floating_base = n.find("FloatingBase") == std::string::npos;
     auto kinova = mc_robots::KinovaRobotModule("kinova", is_callib, is_floating_base);
     if(n == "Kinova" || n == "KinovaFloatingBase")
     {
