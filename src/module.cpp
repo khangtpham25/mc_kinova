@@ -166,7 +166,7 @@ extern "C"
     {
       auto kinova_camera =
           kinova.connect(*camera, "tool_frame", camera_base_frame, "",
-                         mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+                         mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(0.0)));
       addToolCollisions(kinova_camera, {"realsense_d435_bracket_link", "realsense_d435_camera_link"});
       if(n == "KinovaCameraGripper")
       {
