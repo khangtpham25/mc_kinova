@@ -150,11 +150,12 @@ extern "C"
         (n.find("Camera") != std::string::npos) ? mc_rbdyn::RobotLoader::get_robot_module(camera_name) : nullptr;
     auto gripper =
         (n.find("Gripper") != std::string::npos) ? mc_rbdyn::RobotLoader::get_robot_module(gripper_name) : nullptr;
-    if(n == "KinovaGripper")
+    if(n == "KinovaGripper" || n == "KinovaGripperFloatingBase")
     {
       auto kinova_gripper =
           kinova.connect(*gripper, "tool_frame", gripper_base_frame, "",
                          mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+      kinova_gripper.name = "kinova_gripper";
       addToolCollisions(kinova_gripper,
                         {"robotiq_85_base_link", "robotiq_85_left_knuckle_link", "robotiq_85_right_knuckle_link",
                          "robotiq_85_left_finger_link", "robotiq_85_right_finger_link",
@@ -162,23 +163,27 @@ extern "C"
       return new mc_rbdyn::RobotModule(std::move(kinova_gripper));
     }
 
-    if(n.find("KinovaCamera") != std::string::npos)
+    if(n == "KinovaCamera" || n == "KinovaCameraFloatingBase" || n == "KinovaCameraGripper"
+       || n == "KinovaCameraGripperFloatingBase")
     {
       auto kinova_camera =
           kinova.connect(*camera, "tool_frame", camera_base_frame, "",
                          mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(0.0)));
       addToolCollisions(kinova_camera, {"realsense_d435_bracket_link", "realsense_d435_camera_link"});
-      if(n == "KinovaCameraGripper")
+      if(gripper)
       {
         auto kinova_camera_gripper =
             kinova_camera.connect(*gripper, camera_wrench_frame, gripper_base_frame, "",
                                   mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+        kinova_camera_gripper.name = "kinova_camera_gripper";
         addToolCollisions(kinova_camera_gripper,
                           {"robotiq_85_base_link", "robotiq_85_left_knuckle_link", "robotiq_85_right_knuckle_link",
                            "robotiq_85_left_finger_link", "robotiq_85_right_finger_link",
                            "robotiq_85_left_finger_tip_link", "robotiq_85_right_finger_tip_link"});
         return new mc_rbdyn::RobotModule(std::move(kinova_camera_gripper));
       }
+
+      kinova_camera.name = "kinova_camera";
       return new mc_rbdyn::RobotModule(std::move(kinova_camera));
     }
 
@@ -186,18 +191,11 @@ extern "C"
     if(n.find("Bota") != std::string::npos)
     {
       auto bota = mc_rbdyn::RobotLoader::get_robot_module(bota_name);
-      // if(!kinova._forceSensors.empty())
-      // {
-      //   kinova._forceSensors.pop_back();
-      // }
-      // if(!kinova._bodySensors.empty())
-      // {
-      //   kinova._bodySensors.pop_back();
-      // }
 
       auto kinova_bota =
           kinova.connect(*bota, "tool_frame", bota_base_frame, "",
                          mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+      kinova_bota.name = "kinova_bota";
       addToolCollisions(kinova_bota,
                         {"bft_sens_ecat_m8_mounting_0", "bft_sens_ecat_m8_mounting_1", "bft_sens_ecat_m8_mounting_2"});
       if(n == "KinovaBota" || n == "KinovaBotaFloatingBase")
@@ -205,32 +203,38 @@ extern "C"
         return new mc_rbdyn::RobotModule(std::move(kinova_bota));
       }
 
-      if(n.find("DS4") != std::string::npos)
+      if(n == "KinovaBotaDS4" || n == "KinovaBotaDS4FloatingBase" || n == "KinovaBotaDS4Callib"
+         || n == "KinovaBotaDS4CallibFloatingBase")
       {
         auto ds4 = mc_rbdyn::RobotLoader::get_robot_module("DS4");
         auto kinova_bota_ds4 =
             kinova_bota.connect(*ds4, bota_wrench_frame, "ds4_base_link", "",
                                 mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
+        kinova_bota_ds4.name = "kinova_bota_ds4";
         addToolCollisions(kinova_bota_ds4, {"ds4_adapter_link", "ds4_actual_controller_link"});
         return new mc_rbdyn::RobotModule(std::move(kinova_bota_ds4));
       }
 
-      if(n.find("Plate") != std::string::npos)
+      if(n == "KinovaBotaPlate" || n == "KinovaBotaPlateFloatingBase" || n == "KinovaBotaPlateCallib"
+         || n == "KinovaBotaPlateCallibFloatingBase")
       {
         auto plate = mc_rbdyn::RobotLoader::get_robot_module("Plate");
         auto kinova_bota_plate =
             kinova_bota.connect(*plate, bota_wrench_frame, "plate_base_link", "",
                                 mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotX(M_PI / 2)));
+        kinova_bota_plate.name = "kinova_bota_plate";
         addToolCollisions(kinova_bota_plate, {"plate_link"});
         return new mc_rbdyn::RobotModule(std::move(kinova_bota_plate));
       }
 
-      if(n.find("Screw") != std::string::npos)
+      if(n == "KinovaBotaScrew" || n == "KinovaBotaScrewFloatingBase" || n == "KinovaBotaScrewCallib"
+         || n == "KinovaBotaScrewCallibFloatingBase")
       {
         auto screw = mc_rbdyn::RobotLoader::get_robot_module("Screw");
         auto kinova_bota_screw =
             kinova_bota.connect(*screw, bota_wrench_frame, "screw_base_link", "",
                                 mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(0.0)));
+        kinova_bota_screw.name = "kinova_bota_screw";
         addToolCollisions(kinova_bota_screw, {"screw_link"});
         return new mc_rbdyn::RobotModule(std::move(kinova_bota_screw));
       }
