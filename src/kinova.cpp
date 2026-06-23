@@ -7,7 +7,6 @@
 #include <RBDyn/parsers/urdf.h>
 
 #include <filesystem>
-#include <stdexcept>
 namespace fs = std::filesystem;
 
 namespace mc_robots
