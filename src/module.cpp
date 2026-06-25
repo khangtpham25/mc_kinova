@@ -4,22 +4,22 @@
 #include <mc_rbdyn/RobotModuleMacros.h>
 #include <mc_rtc/logging.h>
 
+#include <algorithm>
+#include <cctype>
+#include <map>
+
+#ifdef WITH_MC_ROBOT_TOOLS
+#  include <mc_robot_tools/ConnectableRobotModule.h>
+#endif
+
 namespace
 {
 
-static std::vector<std::string> registered_names;
-
-static std::string camera_name = "RealSenseD435";
-static std::string camera_base_frame = "realsense_d435_base_link";
-static std::string camera_wrench_frame = "realsense_d435_wrench_link";
-static std::string gripper_name = "Robotiq2f85Gripper";
-static std::string gripper_base_frame = "robotiq_85_base_link";
-static std::string bota_name = "BFT_SENS_ECAT_M8";
-static std::string bota_base_frame = "bft_sens_ecat_m8_mounting";
-static std::string bota_wrench_frame = "bft_sens_ecat_m8_wrench";
+// ───── Self-collision config (always available) ─────
+#ifdef WITH_MC_ROBOT_TOOLS
 
 /** Check if a robot module is available (without loading it) */
-bool isAvailable(const std::string & module_name, std::vector<std::string> & available_robots)
+bool isAvailable(const std::string & module_name, const std::vector<std::string> & available_robots)
 {
   return std::find(available_robots.begin(), available_robots.end(), module_name) != available_robots.end();
 }
@@ -43,6 +43,207 @@ void addToolCollisions(mc_rbdyn::RobotModule & module, const std::vector<std::st
   module._commonSelfCollisions = module._minimalSelfCollisions;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// All connectable-tool support is compiled only when mc_robot_tools is found.
+// ═══════════════════════════════════════════════════════════════════════════
+
+static const std::string DEFAULT_CAMERA = "RealSenseD435";
+static const std::string DEFAULT_GRIPPER = "Robotiq2f85Gripper";
+static const std::string DEFAULT_BOTA = "BFT_SENS_ECAT_M8";
+
+static const std::vector<std::string> camera_modules = {"RealSenseD435"};
+static const std::vector<std::string> gripper_modules = {"Robotiq2f85Gripper", "Robotiq2f140Gripper"};
+static const std::vector<std::string> bota_modules = {
+    "BFT_KG3_IND2_SW",  "BFT_MEDS_ECAT_M8", "BFT_MEGS_SER_M8",  "BFT_MN2S_SER_UB",  "BFT_ROKS_SER_M8",
+    "BFT_LAXS_ECAT_M8", "BFT_MEDS_SER_M8",  "BFT_MIPS_ECAT_CG", "BFT_ROKS_CAT2_B4", "BFT_SENS_ECAT_M8",
+    "BFT_LAXS_SER_M8",  "BFT_MEGS_ECAT_M8", "BFT_MIPS_SER_CG",  "BFT_ROKS_ECAT_M8", "BFT_SENS_SER_M8"};
+static const std::vector<std::string> end_effectors = {"DS4", "Plate", "Screw"};
+
+std::string toLower(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+  return s;
+}
+
+/** Load a tool module and require it to be a ConnectableRobotModule. */
+std::shared_ptr<mc_robot_tools::ConnectableRobotModule> loadTool(const std::string & name)
+{
+  auto mod = mc_rbdyn::RobotLoader::get_robot_module(name);
+  if(!mod)
+  {
+    mc_rtc::log::error("Failed to load module '{}'", name);
+    return nullptr;
+  }
+
+  auto connectable = std::static_pointer_cast<mc_robot_tools::ConnectableRobotModule>(mod);
+  if(!connectable)
+  {
+    mc_rtc::log::error("Module '{}' must inherit from mc_robot_tools::ConnectableRobotModule "
+                       "to be attached to Kinova",
+                       name);
+    return nullptr;
+  }
+
+  return connectable;
+}
+
+/** Attach a tool to a parent module using the tool's self-described frames. */
+mc_rbdyn::RobotModule attachTool(mc_rbdyn::RobotModule & parent,
+                                 const std::string & parent_frame,
+                                 const mc_robot_tools::ConnectableRobotModule & tool,
+                                 const std::string & new_name)
+{
+  auto connected =
+      parent.connect(tool, parent_frame, tool.baseFrame(), "",
+                     mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(tool.defaultMountingTransform()));
+  connected.name = new_name;
+  addToolCollisions(connected, tool.collisionLinks());
+  return connected;
+}
+
+// Resolve alias: Camera -> RealSenseD435, etc.
+std::string resolveAlias(const std::string & n)
+{
+  std::string base = n;
+  std::string suffix;
+
+  for(const auto & s : {"FloatingBase", "Callib", "CallibFloatingBase"})
+  {
+    auto pos = base.find(s);
+    if(pos != std::string::npos)
+    {
+      suffix = base.substr(pos);
+      base = base.substr(0, pos);
+      break;
+    }
+  }
+
+  static const std::map<std::string, std::string> aliases = {
+      {"KinovaCamera", "Kinova" + DEFAULT_CAMERA},
+      {"KinovaGripper", "Kinova" + DEFAULT_GRIPPER},
+      {"KinovaCameraGripper", "Kinova" + DEFAULT_CAMERA + DEFAULT_GRIPPER},
+      {"KinovaBota", "Kinova" + DEFAULT_BOTA},
+      {"KinovaBotaDS4", "Kinova" + DEFAULT_BOTA + "DS4"},
+      {"KinovaBotaPlate", "Kinova" + DEFAULT_BOTA + "Plate"},
+      {"KinovaBotaScrew", "Kinova" + DEFAULT_BOTA + "Screw"},
+  };
+
+  auto it = aliases.find(base);
+  if(it != aliases.end())
+  {
+    return it->second + suffix;
+  }
+  return n;
+}
+
+mc_rbdyn::RobotModule * createVariants(const std::string & raw_name,
+                                       const std::string & n,
+                                       mc_robots::KinovaRobotModule & kinova)
+{
+  // Detect which tools are attached
+  std::string camera_mod, gripper_mod, bota_mod, ee_mod;
+
+  for(const auto & cam : camera_modules)
+    if(n.find(cam) != std::string::npos)
+    {
+      camera_mod = cam;
+      break;
+    }
+  for(const auto & grip : gripper_modules)
+    if(n.find(grip) != std::string::npos)
+    {
+      gripper_mod = grip;
+      break;
+    }
+  for(const auto & bota : bota_modules)
+    if(n.find(bota) != std::string::npos)
+    {
+      bota_mod = bota;
+      break;
+    }
+  for(const auto & ee : end_effectors)
+    if(n.find(ee) != std::string::npos)
+    {
+      ee_mod = ee;
+      break;
+    }
+
+  if(camera_mod.empty() && gripper_mod.empty() && bota_mod.empty())
+  {
+    return nullptr;
+  }
+
+  // Check module availability
+  auto available = mc_rbdyn::RobotLoader::available_robots();
+  auto checkAvail = [&](const std::string & m) -> bool
+  {
+    if(!m.empty() && !isAvailable(m, available))
+    {
+      mc_rtc::log::error("Kinova '{}' requires module '{}' which is not available", raw_name, m);
+      return false;
+    }
+    return true;
+  };
+
+  if(!checkAvail(camera_mod) || !checkAvail(gripper_mod) || !checkAvail(bota_mod) || !checkAvail(ee_mod))
+  {
+    return nullptr;
+  }
+
+  // Bota variants
+  if(!bota_mod.empty())
+  {
+    auto bota = loadTool(bota_mod);
+    if(!bota) return nullptr;
+
+    auto kinova_bota = attachTool(kinova, "tool_frame", *bota, "kinova_bota");
+
+    if(ee_mod.empty())
+    {
+      return new mc_rbdyn::RobotModule(std::move(kinova_bota));
+    }
+
+    auto ee = loadTool(ee_mod);
+    if(!ee) return nullptr;
+
+    auto kinova_bota_ee = attachTool(kinova_bota, bota->wrenchFrame(), *ee, "kinova_bota_" + toLower(ee_mod));
+    return new mc_rbdyn::RobotModule(std::move(kinova_bota_ee));
+  }
+
+  // Camera and/or gripper (non-bota)
+  if(!camera_mod.empty())
+  {
+    auto camera = loadTool(camera_mod);
+    if(!camera) return nullptr;
+
+    auto kinova_camera = attachTool(kinova, "tool_frame", *camera, "kinova_camera");
+
+    if(!gripper_mod.empty())
+    {
+      auto gripper = loadTool(gripper_mod);
+      if(!gripper) return nullptr;
+
+      auto kinova_cg = attachTool(kinova_camera, camera->wrenchFrame(), *gripper, "kinova_camera_gripper");
+      return new mc_rbdyn::RobotModule(std::move(kinova_cg));
+    }
+
+    return new mc_rbdyn::RobotModule(std::move(kinova_camera));
+  }
+
+  if(!gripper_mod.empty())
+  {
+    auto gripper = loadTool(gripper_mod);
+    if(!gripper) return nullptr;
+
+    auto kinova_gripper = attachTool(kinova, "tool_frame", *gripper, "kinova_gripper");
+    return new mc_rbdyn::RobotModule(std::move(kinova_gripper));
+  }
+
+  return nullptr;
+}
+
+#endif // WITH_MC_ROBOT_TOOLS
+
 } // namespace
 
 extern "C"
@@ -50,30 +251,38 @@ extern "C"
 
   ROBOT_MODULE_API void MC_RTC_ROBOT_MODULE(std::vector<std::string> & names)
   {
-    names = {"Kinova",
-             "KinovaFloatingBase",
+    names = {"Kinova", "KinovaFloatingBase"};
 
-             "KinovaCamera",
-             "KinovaCameraFloatingBase",
-             "KinovaGripper",
-             "KinovaGripperFloatingBase",
-             "KinovaCameraGripper",
-             "KinovaCameraGripperFloatingBase",
+#ifdef WITH_MC_ROBOT_TOOLS
+    const std::vector<std::string> generic_attachments = {"Camera", "Gripper", "CameraGripper"};
 
-             "KinovaBota",
-             "KinovaBotaFloatingBase",
-             "KinovaBotaDS4",
-             "KinovaBotaDS4FloatingBase",
-             "KinovaBotaDS4Callib",
-             "KinovaBotaDS4CallibFloatingBase",
-             "KinovaBotaPlate",
-             "KinovaBotaPlateFloatingBase",
-             "KinovaBotaPlateCallib",
-             "KinovaBotaPlateCallibFloatingBase",
-             "KinovaBotaScrew",
-             "KinovaBotaScrewFloatingBase",
-             "KinovaBotaScrewCallib",
-             "KinovaBotaScrewCallibFloatingBase"};
+    const std::vector<std::string> end_effector_suffixes = {"", "DS4", "Plate", "Screw"};
+
+    const std::vector<std::string> base_suffixes = {"", "FloatingBase"};
+    auto addWithBaseSuffixes = [&](const std::string & base)
+    {
+      for(const auto & sfx : base_suffixes) names.push_back(base + sfx);
+    };
+
+    const std::vector<std::string> callib_suffixes = {"", "Callib", "FloatingBase", "CallibFloatingBase"};
+    auto addWithCallibSuffixes = [&](const std::string & base)
+    {
+      for(const auto & sfx : callib_suffixes) names.push_back(base + sfx);
+    };
+
+    for(const auto & a : generic_attachments) addWithBaseSuffixes("Kinova" + a);
+
+    for(const auto & ee : end_effector_suffixes) addWithCallibSuffixes("KinovaBota" + ee);
+
+    for(const auto & cam : camera_modules) addWithBaseSuffixes("Kinova" + cam);
+    for(const auto & grip : gripper_modules) addWithBaseSuffixes("Kinova" + grip);
+
+    for(const auto & cam : camera_modules)
+      for(const auto & grip : gripper_modules) addWithBaseSuffixes("Kinova" + cam + grip);
+
+    for(const auto & bota : bota_modules)
+      for(const auto & ee : end_effector_suffixes) addWithCallibSuffixes("Kinova" + bota + ee);
+#endif
   }
 
   ROBOT_MODULE_API void destroy(mc_rbdyn::RobotModule * ptr)
@@ -81,166 +290,49 @@ extern "C"
     delete ptr;
   }
 
-  ROBOT_MODULE_API mc_rbdyn::RobotModule * create(const std::string & n)
+  ROBOT_MODULE_API mc_rbdyn::RobotModule * create(const std::string & raw_name)
   {
     ROBOT_MODULE_CHECK_VERSION("Kinova")
 
-    // Check Callib is supported
-    bool is_callib = n.find("Callib") != std::string::npos;
-    if(is_callib && n.find("Bota") == std::string::npos)
+#ifdef WITH_MC_ROBOT_TOOLS
+    const std::string n = resolveAlias(raw_name);
+    if(n != raw_name)
     {
-      mc_rtc::log::error("KinovaRobotModule callib mode requires a Bota variant with a mounted end effector");
+      mc_rtc::log::info("Kinova: '{}' resolved to '{}'", raw_name, n);
+    }
+#else
+    const std::string n = raw_name;
+#endif
+
+    bool is_callib = n.find("Callib") != std::string::npos;
+    bool is_floating_base = n.find("FloatingBase") != std::string::npos;
+
+    if(is_callib && n.find("BFT_") == std::string::npos)
+    {
+      mc_rtc::log::error("Kinova: Callib mode requires a Bota variant");
       return nullptr;
     }
 
-    // Create base module
-    bool is_floating_base = n.find("FloatingBase") != std::string::npos;
     auto kinova = mc_robots::KinovaRobotModule("kinova", is_callib, !is_floating_base);
+
+    // ───── Base Kinova (always supported) ─────
     if(n == "Kinova" || n == "KinovaFloatingBase")
     {
       return new mc_rbdyn::RobotModule(std::move(kinova));
     }
 
-    // Check required modules is available
-    auto available_robots = mc_rbdyn::RobotLoader::available_robots();
-    if(n.find("Camera") != std::string::npos && !isAvailable(camera_name, available_robots))
+#ifdef WITH_MC_ROBOT_TOOLS
+    if(auto * result = createVariants(raw_name, n, kinova))
     {
-      mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
-      mc_rtc::log::error("Camera module is not available");
-      return nullptr;
+      return result;
     }
+#else
+    mc_rtc::log::error("Kinova: variant '{}' may require mc_robot_tools, which was not found at build time. "
+                       "Rebuild mc_kinova with mc_robot_tools installed to enable attached tool variants.",
+                       raw_name);
+#endif
 
-    if(n.find("Gripper") != std::string::npos && !isAvailable(gripper_name, available_robots))
-    {
-      mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
-      mc_rtc::log::error("{} module is not available", gripper_name);
-      return nullptr;
-    }
-
-    if(n.find("Bota") != std::string::npos && !isAvailable(bota_name, available_robots))
-    {
-      mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
-      mc_rtc::log::error("{} module is not available", bota_name);
-      return nullptr;
-    }
-
-    if(n.find("DS4") != std::string::npos && !isAvailable("DS4", available_robots))
-    {
-      mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
-      mc_rtc::log::error("{} module is not available", bota_name);
-      return nullptr;
-    }
-
-    if(n.find("Plate") != std::string::npos && !isAvailable("Plate", available_robots))
-    {
-      mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
-      mc_rtc::log::error("Plate module is not available");
-      return nullptr;
-    }
-
-    if(n.find("Screw") != std::string::npos && !isAvailable("Screw", available_robots))
-    {
-      mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
-      mc_rtc::log::error("Screw module is not available");
-      return nullptr;
-    }
-
-    // Variants with Camera and Gripper
-    auto camera =
-        (n.find("Camera") != std::string::npos) ? mc_rbdyn::RobotLoader::get_robot_module(camera_name) : nullptr;
-    auto gripper =
-        (n.find("Gripper") != std::string::npos) ? mc_rbdyn::RobotLoader::get_robot_module(gripper_name) : nullptr;
-    if(n == "KinovaGripper" || n == "KinovaGripperFloatingBase")
-    {
-      auto kinova_gripper =
-          kinova.connect(*gripper, "tool_frame", gripper_base_frame, "",
-                         mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
-      kinova_gripper.name = "kinova_gripper";
-      addToolCollisions(kinova_gripper,
-                        {"robotiq_85_base_link", "robotiq_85_left_knuckle_link", "robotiq_85_right_knuckle_link",
-                         "robotiq_85_left_finger_link", "robotiq_85_right_finger_link",
-                         "robotiq_85_left_finger_tip_link", "robotiq_85_right_finger_tip_link"});
-      return new mc_rbdyn::RobotModule(std::move(kinova_gripper));
-    }
-
-    if(n == "KinovaCamera" || n == "KinovaCameraFloatingBase" || n == "KinovaCameraGripper"
-       || n == "KinovaCameraGripperFloatingBase")
-    {
-      auto kinova_camera =
-          kinova.connect(*camera, "tool_frame", camera_base_frame, "",
-                         mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(0.0)));
-      addToolCollisions(kinova_camera, {"realsense_d435_bracket_link", "realsense_d435_camera_link"});
-      if(gripper)
-      {
-        auto kinova_camera_gripper =
-            kinova_camera.connect(*gripper, camera_wrench_frame, gripper_base_frame, "",
-                                  mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
-        kinova_camera_gripper.name = "kinova_camera_gripper";
-        addToolCollisions(kinova_camera_gripper,
-                          {"robotiq_85_base_link", "robotiq_85_left_knuckle_link", "robotiq_85_right_knuckle_link",
-                           "robotiq_85_left_finger_link", "robotiq_85_right_finger_link",
-                           "robotiq_85_left_finger_tip_link", "robotiq_85_right_finger_tip_link"});
-        return new mc_rbdyn::RobotModule(std::move(kinova_camera_gripper));
-      }
-
-      kinova_camera.name = "kinova_camera";
-      return new mc_rbdyn::RobotModule(std::move(kinova_camera));
-    }
-
-    // Variants with Bota
-    if(n.find("Bota") != std::string::npos)
-    {
-      auto bota = mc_rbdyn::RobotLoader::get_robot_module(bota_name);
-
-      auto kinova_bota =
-          kinova.connect(*bota, "tool_frame", bota_base_frame, "",
-                         mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
-      kinova_bota.name = "kinova_bota";
-      addToolCollisions(kinova_bota,
-                        {"bft_sens_ecat_m8_mounting_0", "bft_sens_ecat_m8_mounting_1", "bft_sens_ecat_m8_mounting_2"});
-      if(n == "KinovaBota" || n == "KinovaBotaFloatingBase")
-      {
-        return new mc_rbdyn::RobotModule(std::move(kinova_bota));
-      }
-
-      if(n == "KinovaBotaDS4" || n == "KinovaBotaDS4FloatingBase" || n == "KinovaBotaDS4Callib"
-         || n == "KinovaBotaDS4CallibFloatingBase")
-      {
-        auto ds4 = mc_rbdyn::RobotLoader::get_robot_module("DS4");
-        auto kinova_bota_ds4 =
-            kinova_bota.connect(*ds4, bota_wrench_frame, "ds4_base_link", "",
-                                mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(M_PI)));
-        kinova_bota_ds4.name = "kinova_bota_ds4";
-        addToolCollisions(kinova_bota_ds4, {"ds4_adapter_link", "ds4_actual_controller_link"});
-        return new mc_rbdyn::RobotModule(std::move(kinova_bota_ds4));
-      }
-
-      if(n == "KinovaBotaPlate" || n == "KinovaBotaPlateFloatingBase" || n == "KinovaBotaPlateCallib"
-         || n == "KinovaBotaPlateCallibFloatingBase")
-      {
-        auto plate = mc_rbdyn::RobotLoader::get_robot_module("Plate");
-        auto kinova_bota_plate =
-            kinova_bota.connect(*plate, bota_wrench_frame, "plate_base_link", "",
-                                mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotX(M_PI / 2)));
-        kinova_bota_plate.name = "kinova_bota_plate";
-        addToolCollisions(kinova_bota_plate, {"plate_link"});
-        return new mc_rbdyn::RobotModule(std::move(kinova_bota_plate));
-      }
-
-      if(n == "KinovaBotaScrew" || n == "KinovaBotaScrewFloatingBase" || n == "KinovaBotaScrewCallib"
-         || n == "KinovaBotaScrewCallibFloatingBase")
-      {
-        auto screw = mc_rbdyn::RobotLoader::get_robot_module("Screw");
-        auto kinova_bota_screw =
-            kinova_bota.connect(*screw, bota_wrench_frame, "screw_base_link", "",
-                                mc_rbdyn::RobotModule::ConnectionParameters{}.X_other_connection(sva::RotZ(0.0)));
-        kinova_bota_screw.name = "kinova_bota_screw";
-        addToolCollisions(kinova_bota_screw, {"screw_link"});
-        return new mc_rbdyn::RobotModule(std::move(kinova_bota_screw));
-      }
-    }
-
-    mc_rtc::log::error("Kinova module cannot create an object of type {}", n);
+    mc_rtc::log::error("Kinova module cannot create an object of type {}", raw_name);
     return nullptr;
   }
 }
