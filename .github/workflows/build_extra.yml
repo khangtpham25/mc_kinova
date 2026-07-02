@@ -134,6 +134,8 @@ jobs:
           cd /tmp/mc_robot_tools/build
           sudo make install
 
+          # testest
+
           echo "CMAKE_PREFIX_PATH=/usr/local:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
 
       - name: Build and test
