@@ -10,6 +10,7 @@
 
 #ifdef WITH_MC_ROBOT_TOOLS
 #  include <mc_robot_tools/ConnectableRobotModule.h>
+#  include <mc_robot_tools/mc_robot_tools.h>
 #endif
 
 namespace
@@ -47,17 +48,33 @@ void addToolCollisions(mc_rbdyn::RobotModule & module, const std::vector<std::st
 // All connectable-tool support is compiled only when mc_robot_tools is found.
 // ═══════════════════════════════════════════════════════════════════════════
 
-static const std::string DEFAULT_CAMERA = "RealSenseD435";
-static const std::string DEFAULT_GRIPPER = "Robotiq2f85Gripper";
-static const std::string DEFAULT_BOTA = "BFT_SENS_ECAT_M8";
+static const std::vector<std::string> camera_modules = mc_robot_tools::listRealSense();
+static const std::vector<std::string> gripper_modules = mc_robot_tools::listRobotiqGripper();
+static const std::vector<std::string> bota_modules = mc_robot_tools::listBotaSensor();
 
-static const std::vector<std::string> camera_modules = {"RealSenseD435"};
-static const std::vector<std::string> gripper_modules = {"Robotiq2f85Gripper", "Robotiq2f140Gripper"};
-static const std::vector<std::string> bota_modules = {
-    "BFT_KG3_IND2_SW",  "BFT_MEDS_ECAT_M8", "BFT_MEGS_SER_M8",  "BFT_MN2S_SER_UB",  "BFT_ROKS_SER_M8",
-    "BFT_LAXS_ECAT_M8", "BFT_MEDS_SER_M8",  "BFT_MIPS_ECAT_CG", "BFT_ROKS_CAT2_B4", "BFT_SENS_ECAT_M8",
-    "BFT_LAXS_SER_M8",  "BFT_MEGS_ECAT_M8", "BFT_MIPS_SER_CG",  "BFT_ROKS_ECAT_M8", "BFT_SENS_SER_M8"};
-static const std::vector<std::string> end_effectors = {"DS4", "Plate", "Screw"};
+static const std::vector<std::string> end_effectors = []
+{
+  std::vector<std::string> all_effectors;
+
+  if(bota_modules.empty())
+  {
+    return all_effectors;
+  }
+
+  auto ds4 = mc_robot_tools::listDS4();
+  auto plate = mc_robot_tools::listPlate();
+  auto screw = mc_robot_tools::listScrew();
+
+  all_effectors.insert(all_effectors.end(), ds4.begin(), ds4.end());
+  all_effectors.insert(all_effectors.end(), plate.begin(), plate.end());
+  all_effectors.insert(all_effectors.end(), screw.begin(), screw.end());
+
+  return all_effectors;
+}();
+
+static const std::string DEFAULT_CAMERA = !camera_modules.empty() ? camera_modules.front() : "";
+static const std::string DEFAULT_GRIPPER = !gripper_modules.empty() ? gripper_modules.front() : "";
+static const std::string DEFAULT_BOTA = !bota_modules.empty() ? "BFT_SENS_ECAT_M8" : "";
 
 std::string toLower(std::string s)
 {
@@ -118,15 +135,23 @@ std::string resolveAlias(const std::string & n)
     }
   }
 
-  static const std::map<std::string, std::string> aliases = {
-      {"KinovaCamera", "Kinova" + DEFAULT_CAMERA},
-      {"KinovaGripper", "Kinova" + DEFAULT_GRIPPER},
-      {"KinovaCameraGripper", "Kinova" + DEFAULT_CAMERA + DEFAULT_GRIPPER},
-      {"KinovaBota", "Kinova" + DEFAULT_BOTA},
-      {"KinovaBotaDS4", "Kinova" + DEFAULT_BOTA + "DS4"},
-      {"KinovaBotaPlate", "Kinova" + DEFAULT_BOTA + "Plate"},
-      {"KinovaBotaScrew", "Kinova" + DEFAULT_BOTA + "Screw"},
-  };
+  static const std::map<std::string, std::string> aliases = []()
+  {
+    std::map<std::string, std::string> m;
+    if(!DEFAULT_CAMERA.empty()) m["KinovaCamera"] = "Kinova" + DEFAULT_CAMERA;
+    if(!DEFAULT_GRIPPER.empty())
+    {
+      m["KinovaGripper"] = "Kinova" + DEFAULT_GRIPPER;
+      if(!DEFAULT_CAMERA.empty()) m["KinovaCameraGripper"] = "Kinova" + DEFAULT_CAMERA + DEFAULT_GRIPPER;
+    }
+
+    if(!DEFAULT_BOTA.empty())
+    {
+      m["KinovaBota"] = "Kinova" + DEFAULT_BOTA;
+      for(const auto & ee : end_effectors) m["KinovaBota" + ee] = "Kinova" + DEFAULT_BOTA + ee;
+    }
+    return m;
+  }();
 
   auto it = aliases.find(base);
   if(it != aliases.end())
@@ -254,9 +279,21 @@ extern "C"
     names = {"Kinova", "KinovaFloatingBase"};
 
 #ifdef WITH_MC_ROBOT_TOOLS
-    const std::vector<std::string> generic_attachments = {"Camera", "Gripper", "CameraGripper"};
 
-    const std::vector<std::string> end_effector_suffixes = {"", "DS4", "Plate", "Screw"};
+    // Adding Camera, Gripper, CameraGripper variants
+    std::vector<std::string> generic_attachments{};
+    if(!DEFAULT_CAMERA.empty())
+    {
+      generic_attachments.emplace_back("Camera");
+    }
+    if(!DEFAULT_GRIPPER.empty())
+    {
+      generic_attachments.emplace_back("Gripper");
+      if(!DEFAULT_CAMERA.empty())
+      {
+        generic_attachments.emplace_back("CameraGripper");
+      }
+    }
 
     const std::vector<std::string> base_suffixes = {"", "FloatingBase"};
     auto addWithBaseSuffixes = [&](const std::string & base)
@@ -272,16 +309,30 @@ extern "C"
 
     for(const auto & a : generic_attachments) addWithBaseSuffixes("Kinova" + a);
 
-    for(const auto & ee : end_effector_suffixes) addWithCallibSuffixes("KinovaBota" + ee);
-
     for(const auto & cam : camera_modules) addWithBaseSuffixes("Kinova" + cam);
     for(const auto & grip : gripper_modules) addWithBaseSuffixes("Kinova" + grip);
 
     for(const auto & cam : camera_modules)
       for(const auto & grip : gripper_modules) addWithBaseSuffixes("Kinova" + cam + grip);
 
-    for(const auto & bota : bota_modules)
-      for(const auto & ee : end_effector_suffixes) addWithCallibSuffixes("Kinova" + bota + ee);
+    // Adding bota sensor variants
+    if(!DEFAULT_BOTA.empty())
+    {
+      std::vector<std::string> end_effector_suffixes = {""};
+      for(const auto & ee : end_effectors)
+      {
+        if(!ee.empty())
+        {
+          end_effector_suffixes.push_back(ee);
+        }
+      }
+
+      for(const auto & ee : end_effector_suffixes)
+      {
+        addWithCallibSuffixes("KinovaBota" + ee);
+        for(const auto & bota : bota_modules) addWithCallibSuffixes("Kinova" + bota + ee);
+      }
+    }
 #endif
   }
 
