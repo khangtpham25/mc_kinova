@@ -24,7 +24,7 @@ You can also specify exact tools — useful when you have multiple compatible mo
 ```
 KinovaRealSenseD435
 KinovaRobotiq2f85Gripper
-KinovaRobotiq2f140Gripper
+KinovaRobotiqHandEGripper
 KinovaRealSenseD435Robotiq2f85Gripper
 KinovaBFT_SENS_ECAT_M8DS4
 KinovaBFT_MEDS_ECAT_M8Plate
@@ -42,25 +42,28 @@ The naming convention is `Kinova<tool_module><end effector>`.
 - [kortex_description](https://github.com/Kinovarobotics/ros2_kortex)
 ### Optional
 - [mc_robot_tools](https://github.com/isri-aist/mc_robot_tools)
-  - [robotiq_description](https://github.com/PickNikRobotics/ros2_robotiq_gripper/tree/main/robotiq_description)
   - [bota_driver](https://gitlab.com/botasys/drivers/bota_driver_ros2)
+  - [robotiq_description](https://github.com/PickNikRobotics/ros2_robotiq_gripper/tree/main/robotiq_description)
+  - [robotiq_hande_description](https://github.com/macmacal/robotiq_hande_description)
 
-To install `kortex_description`, `robotiq_description`, and `bota_driver`, you can use the following command:
+To install `kortex_description`, `bota_driver`, `robotiq_description`, and `robotiq_hande_description`, you can use the following command:
 
 ```sh
 mkdir -p ros2_ws/src && cd ros2_ws/src
 
 git clone https://github.com/Kinovarobotics/ros2_kortex.git
 # Optional — only needed if you want tool variants
-git clone https://github.com/PickNikRobotics/ros2_robotiq_gripper.git
 git clone https://gitlab.com/botasys/drivers/bota_driver_ros2.git
+git clone https://github.com/PickNikRobotics/ros2_robotiq_gripper.git
+git clone https://github.com/macmacal/robotiq_hande_description.git
 
 cd ..
 colcon build --symlink-install \
   --packages-select \
     kortex_description \
-    robotiq_description \
     bota_driver \
+    robotiq_description \
+    robotiq_hande_description
   --cmake-args -Wno-dev
 
 source install/setup.bash
@@ -79,7 +82,7 @@ cd ..
 ```
 CMake will automatically detect mc_robot_tools if installed and enable the tool variants.
 
-To test the module is installed correctly, run the following command, run the following command from the root of the repository:
+To test the module is installed correctly, run the following command from the root of the repository:
 
 ```sh
 mc_rtc_ticker -f etc/mc_rtc.yaml
