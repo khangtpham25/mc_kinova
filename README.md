@@ -2,7 +2,7 @@
 
 mc_rtc robot module for Kinova Gen3 robot arms.
 
-By default, only `Kinova` and `KinovaFloatingBase` are supported. To attach other tools (camera, gripper, force torque sensor, etc) to the end effector, install [mc_robot_tools](#dependencies) before building.
+By default, only `Kinova` and `KinovaFloatingBase` are supported. To attach other tools (camera, gripper, force torque sensor, etc) to the end effector, install [mc_robot_tools](#dependencies) before building this module.
 
 ## Available robots variants
 
@@ -90,3 +90,33 @@ mc_rtc_ticker -f etc/mc_rtc.yaml
 <p align="center">
   <img src="etc/kinova.png" alt="KinovaG3 mc_rtc_ticker test" height="500">
 </p>
+
+## Note: using `vcstool` with `.repos` files
+
+This repository uses [vcstool](https://github.com/dirk-thomas/vcstool) ROS 2 dependency sources from `.repos` files. This keeps dependency setup reproducible and avoids manually cloning each repository. See the GitHub Actions workflows for examples.
+
+- `default_dependencies.repos` contains the required ROS 2 dependencies.
+- `extra_dependencies.repos` contains optional tool-related dependencies such as `bota_driver_ros2`, `ros2_robotiq_gripper`, and `robotiq_hande_description`, which are only required when building variants that depend on [mc_robot_tools](#dependencies).
+
+To set up all ROS 2 dependencies:
+
+```sh
+mkdir -p /tmp/ros2_ws/src
+
+vcs import --shallow --input default_dependencies.repos /tmp/ros2_ws/src
+vcs import --shallow --input extra_dependencies.repos /tmp/ros2_ws/src
+
+cd /tmp/ros2_ws
+colcon build --symlink-install \
+  --packages-select \
+    kortex_description \
+    bota_driver \
+    robotiq_description \
+    robotiq_hande_description
+  --cmake-args -Wno-dev
+
+source install/setup.bash
+```
+
+The `vcs import` commands clone each repository listed in the `.repos` files into the workspace source directory (`/tmp/ros2_ws/src`). You may replace this path with any desired ROS2 workspace location.
+```
